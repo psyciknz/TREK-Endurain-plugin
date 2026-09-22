@@ -1,30 +1,42 @@
 {
-  "id": "wanderlog-import",
-  "name": "Wanderlog Import",
-  "version": "1.2.0",
+  "id": "endurain-import",
+  "name": "Endurain Import",
+  "version": "1.0.0",
   "apiVersion": 1,
-  "author": "lahlafi",
-  "description": "Import a trip from Wanderlog into TREK by pasting its view URL — recreates days, places, notes, flights, and hotel stays.",
-  "homepage": "https://github.com/danl12353231/TREK-Wanderlog-plugin",
+  "author": "psyciknz",
+  "description": "Browse Endurain activities and import selected activities into a TREK trip.",
+  "homepage": "https://github.com/psyciknz/TREK-Endurain-plugin",
   "license": "MIT",
-  "icon": "Plane",
+  "icon": "Footprints",
   "type": "page",
-  "trek": ">=3.4.0 <5.0.0",
+  "trek": ">=4.0.0 <5.0.0",
   "nativeModules": false,
   "permissions": [
     "db:own",
     "db:read:trips",
-    "db:read:categories",
-    "db:create:trips",
-    "db:write:trips",
     "db:write:days",
     "db:write:places",
     "db:write:itinerary",
-    "db:write:daynotes",
-    "db:write:accommodations",
-    "db:write:reservations",
     "db:meta",
-    "http:outbound:wanderlog.com"
+    "http:outbound"
   ],
-  "egress": ["wanderlog.com"]
+  "operatorEgress": true,
+  "settings": [
+    {
+      "key": "endurain_url",
+      "label": "Endurain URL",
+      "scope": "user",
+      "required": true,
+      "placeholder": "https://endurain.example.com"
+    },
+    {
+      "key": "access_token",
+      "label": "Endurain access token",
+      "scope": "user",
+      "required": true,
+      "secret": true,
+      "input_type": "password",
+      "hint": "Use an Endurain bearer access token. It is stored encrypted and never sent to the browser."
+    }
+  ]
 }
