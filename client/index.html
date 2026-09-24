@@ -12,6 +12,10 @@
     h1 { margin: 0 0 6px; font-size: 23px; }
     .subtitle { margin: 0; color: var(--text-muted); line-height: 1.5; }
     .toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+    .filters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 10px; margin-bottom: 14px; }
+    .filter label { display: block; margin-bottom: 5px; color: var(--text-muted); font-size: 12px; }
+    .filter input { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--border-primary); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text-primary); font: inherit; }
+    .filter-action { align-self: end; }
     .toolbar .trek-btn { white-space: nowrap; }
     .summary { color: var(--text-muted); font-size: 13px; margin-left: auto; }
     .list { display: grid; gap: 8px; }
@@ -30,6 +34,7 @@
       .page { padding: 20px 16px 28px; }
       .header { display: block; }
       .toolbar { align-items: stretch; flex-wrap: wrap; }
+      .filters { grid-template-columns: 1fr 1fr; }
       .summary { width: 100%; margin-left: 0; }
     }
   </style>
@@ -49,6 +54,12 @@
       <button id="select-all" class="trek-btn trek-btn--ghost" type="button">Select all</button>
       <span id="summary" class="summary"></span>
     </div>
+    <div class="filters">
+      <div class="filter"><label for="start-date">From</label><input id="start-date" type="date"></div>
+      <div class="filter"><label for="end-date">To</label><input id="end-date" type="date"></div>
+      <div class="filter"><label for="name-search">Activity name</label><input id="name-search" type="search" placeholder="Search activity names"></div>
+      <button id="search" class="trek-btn trek-btn--secondary filter-action" type="button">Search</button>
+    </div>
     <div id="status" class="status" role="status"></div>
     <section id="activities" class="list" aria-live="polite"></section>
   </main>
@@ -64,6 +75,11 @@
       var importButton = document.getElementById('import');
       var selectAllButton = document.getElementById('select-all');
       var summary = document.getElementById('summary');
+      var startDate = document.getElementById('start-date');
+      var endDate = document.getElementById('end-date');
+      var nameSearch = document.getElementById('name-search');
+      var searchButton = document.getElementById('search');
+      var contextReady = false;
 
       function escapeHtml(value) {
         return String(value == null ? '' : value).replace(/[&<>"']/g, function (c) {
@@ -115,7 +131,16 @@
         if (busy) return;
         setStatus('Loading activities…');
         list.innerHTML = '<div class="empty">Loading…</div>';
-        window.trek.invoke('/activities?limit=100', { method: 'GET' }).then(function (data) {
+        if (!contextReady) {
+          setStatus('Open this plugin from inside a trip.', 'error');
+          list.innerHTML = '<div class="empty">No trip context is available.</div>';
+          return;
+        }
+        var params = new URLSearchParams({ limit: '100' });
+        if (startDate.value) params.set('startDate', startDate.value);
+        if (endDate.value) params.set('endDate', endDate.value);
+        if (nameSearch.value.trim()) params.set('nameSearch', nameSearch.value.trim());
+        window.trek.invoke('/activities?' + params.toString(), { method: 'GET' }).then(function (data) {
           if (!data || !data.ok) throw new Error((data && data.message) || 'Could not load activities.');
           activities = data.activities || [];
           setStatus('');
@@ -150,16 +175,33 @@
 
       window.trek.onContext(function (context) {
         tripId = context && context.tripId ? Number(context.tripId) : null;
+        contextReady = !!tripId;
         updateControls();
+        if (!tripId) {
+          setStatus('Open this plugin from inside a trip.', 'error');
+          return;
+        }
+        window.trek.invoke('/trip-range?tripId=' + encodeURIComponent(tripId), { method: 'GET' }).then(function (range) {
+          startDate.value = range && range.startDate || '';
+          endDate.value = range && range.endDate || '';
+          startDate.max = endDate.value || '';
+          endDate.min = startDate.value || '';
+          loadActivities();
+        }).catch(function (error) {
+          setStatus('Could not load trip dates: ' + (error.message || 'unknown error'), 'error');
+          loadActivities();
+        });
       });
       importButton.addEventListener('click', importSelected);
       list.addEventListener('change', updateControls);
       document.getElementById('refresh').addEventListener('click', loadActivities);
+      searchButton.addEventListener('click', loadActivities);
+      startDate.addEventListener('change', function () { endDate.min = startDate.value || ''; });
+      endDate.addEventListener('change', function () { startDate.max = endDate.value || ''; });
       selectAllButton.addEventListener('click', function () {
         Array.prototype.slice.call(list.querySelectorAll('input[type=checkbox]')).forEach(function (input) { input.checked = true; });
         updateControls();
       });
-      loadActivities();
     }());
   </script>
 </body>

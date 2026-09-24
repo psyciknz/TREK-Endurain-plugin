@@ -23,8 +23,21 @@ function cleanUrl(value) {
   return url;
 }
 
+function tokenUserId(token) {
+  const parts = String(token || '').split('.');
+  if (parts.length !== 3) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+    const id = Number(payload.sub || payload.user_id || payload.userId);
+    return Number.isInteger(id) && id > 0 ? id : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 function asArray(data) {
   if (Array.isArray(data)) return data;
+  if (data && Array.isArray(data.records)) return data.records;
   if (data && Array.isArray(data.items)) return data.items;
   if (data && Array.isArray(data.activities)) return data.activities;
   if (data && Array.isArray(data.results)) return data.results;
@@ -74,6 +87,7 @@ async function setting(ctx, key) {
 async function endurainRequest(ctx, path, options) {
   const base = cleanUrl(await setting(ctx, 'endurain_url'));
   const token = await setting(ctx, 'access_token');
+  ctx.log.info(`Endurain request: ${(options && options.method) || 'GET'} ${API_PREFIX}${path}`);
   let response;
   try {
     response = await fetch(`${base}${API_PREFIX}${path}`, {
@@ -82,6 +96,7 @@ async function endurainRequest(ctx, path, options) {
         Accept: 'application/json',
         Authorization: `Bearer ${token}`,
         'X-Client-Type': 'mobile',
+        'User-Agent': 'Endurain Import TREK plugin/1.1',
         ...((options && options.headers) || {}),
       },
     });
@@ -91,9 +106,20 @@ async function endurainRequest(ctx, path, options) {
   if (!response.ok) {
     let detail = '';
     try { detail = (await response.json()).detail || ''; } catch (_) {}
+    ctx.log.warn(`Endurain response: HTTP ${response.status}${detail ? ` (${detail})` : ''}`);
     throw new Error(`Endurain returned HTTP ${response.status}${detail ? `: ${detail}` : ''}`);
   }
+  ctx.log.info(`Endurain response: HTTP ${response.status}`);
   return response.json();
+}
+
+async function tripRange(ctx, tripId) {
+  const trips = await ctx.trips.listMine();
+  const trip = (trips || []).find((item) => Number(item.id) === Number(tripId));
+  return {
+    startDate: trip && (trip.start_date || trip.startDate) || null,
+    endDate: trip && (trip.end_date || trip.endDate) || null,
+  };
 }
 
 async function findOrCreateDay(ctx, tripId, date) {
@@ -141,6 +167,7 @@ async function importActivity(ctx, tripId, activity) {
 
 module.exports = definePlugin({
   async onLoad(ctx) {
+    ctx.log.info('Endurain Import loaded');
     await ctx.db.migrate(
       '001_activity_imports',
       `CREATE TABLE IF NOT EXISTS activity_imports (
@@ -162,12 +189,40 @@ module.exports = definePlugin({
         try {
           const page = Math.max(1, Number(req.query.page || 1));
           const limit = Math.min(MAX_ACTIVITY_LIMIT, Math.max(1, Number(req.query.limit || 50)));
-          const params = new URLSearchParams({ page: String(page), limit: String(limit) });
-          const data = await endurainRequest(ctx, `/activities?${params}`);
+          const startDate = String(req.query.startDate || '').trim();
+          const endDate = String(req.query.endDate || '').trim();
+          const nameSearch = String(req.query.nameSearch || '').trim();
+          const token = await setting(ctx, 'access_token');
+          const userId = tokenUserId(token);
+          if (!userId) throw new Error('The Endurain access token does not contain a usable user id (JWT sub claim).');
+          const params = new URLSearchParams({ sort_by: 'start_time', sort_order: 'desc' });
+          if (startDate) params.set('start_date', startDate);
+          if (endDate) params.set('end_date', endDate);
+          if (nameSearch) params.set('name_search', nameSearch);
+          const path = `/activities/user/${userId}/page_number/${page}/num_records/${limit}?${params}`;
+          ctx.log.info(`Loading Endurain activities: user=${userId}, page=${page}, limit=${limit}, start=${startDate || '-'}, end=${endDate || '-'}, name=${nameSearch || '-'}`);
+          const data = await endurainRequest(ctx, path);
           return jsonResponse(200, { ok: true, activities: asArray(data).map(normalizeActivity), page, limit });
         } catch (error) {
           ctx.log.warn(`Endurain activity list failed: ${error.message}`);
           return fail(422, error.message);
+        }
+      },
+    },
+    {
+      method: 'GET',
+      path: '/trip-range',
+      auth: true,
+      async handler(req, ctx) {
+        const tripId = Number(req.query.tripId);
+        if (!Number.isInteger(tripId) || tripId < 1) return jsonResponse(200, { startDate: null, endDate: null });
+        try {
+          const range = await tripRange(ctx, tripId);
+          ctx.log.info(`Trip range loaded: trip=${tripId}, start=${range.startDate || '-'}, end=${range.endDate || '-'}`);
+          return jsonResponse(200, range);
+        } catch (error) {
+          ctx.log.warn(`Trip range failed for trip ${tripId}: ${error.message}`);
+          return jsonResponse(200, { startDate: null, endDate: null, error: error.message });
         }
       },
     },

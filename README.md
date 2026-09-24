@@ -2,7 +2,7 @@
 
 ## What it does
 
-A TREK page plugin that lists activities from a user's self-hosted Endurain instance and imports selected activities into the currently open TREK trip.
+A TREK trip-page plugin that lists activities from a user's self-hosted Endurain instance and imports selected activities into the currently open TREK trip.
 
 Each imported activity becomes a TREK place at the activity's starting coordinate, assigned to a TREK day matching the Endurain activity date. The place notes retain the Endurain activity id, sport, and description. Re-importing the same activity into the same trip is de-duplicated.
 
@@ -13,7 +13,7 @@ This plugin intentionally uses its own activity picker. TREK plugins cannot invo
 1. Open TREK Settings -> Plugins -> Endurain Import.
 2. Enter the HTTPS URL of the Endurain instance, without `/api/v1`.
 3. Enter an Endurain bearer access token with access to activities.
-4. Open a TREK trip and navigate to the Endurain Import page.
+4. Open a TREK trip and select the Endurain Import tab.
 5. Select activities and click Import selected.
 
 The access token is a user-scoped secret setting. It is read only by the server route and is never sent to the browser frame.
@@ -21,8 +21,10 @@ The access token is a user-scoped secret setting. It is read only by the server 
 The Endurain API is expected at:
 
 ```text
-GET  {endurainUrl}/api/v1/activities?page=1&limit=100
+GET  {endurainUrl}/api/v1/activities/user/{userId}/page_number/1/num_records/100?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD&name_search=ride
 GET  {endurainUrl}/api/v1/activities/{activityId}
+
+The list route and filters match Endurain's authenticated activity API. The user id is read from the access token's JWT `sub` claim; the token is never logged or sent to the browser.
 ```
 
 Endurain documents bearer authentication with `Authorization: Bearer <token>` and `X-Client-Type`. The plugin sends `X-Client-Type: mobile` for read requests.
@@ -33,7 +35,7 @@ The activity picker screenshot is stored in `docs/screenshot.png`.
 
 ## Compatibility
 
-Supports TREK 4.x (`>=4.0.0 <5.0.0`). The plugin uses the standard page frame bridge, authenticated plugin routes, user settings, and the `ctx.places`, `ctx.days`, `ctx.itinerary`, and `ctx.trips` APIs.
+Supports TREK 4.x (`>=4.2.0 <5.0.0`). The plugin uses the standard trip-page frame bridge, authenticated plugin routes, user settings, and the `ctx.places`, `ctx.days`, `ctx.itinerary`, and `ctx.trips` APIs.
 
 ## Permissions
 
