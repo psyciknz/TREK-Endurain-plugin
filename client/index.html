@@ -30,6 +30,9 @@
     .status { min-height: 22px; margin: 12px 0; color: var(--text-muted); font-size: 13px; }
     .status.success { color: var(--success); }
     .status.error { color: var(--danger); }
+    .search-btn{background:var(--accent);border:none;border-radius:var(--radius-sm);padding:0 20px;height:38px;color:var(--accent-text);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;transition:background .12s;align-self:end;}
+    .search-btn:hover:not(:disabled){background:var(--accent-hover);}
+    .search-btn:disabled{opacity:.
     @media (max-width: 560px) {
       .page { padding: 20px 16px 28px; }
       .header { display: block; }
@@ -46,7 +49,7 @@
         <h1>Import from Endurain</h1>
         <p class="subtitle">Select recorded activities and add their starting locations to the open TREK trip.</p>
       </div>
-      <button id="refresh" class="trek-btn trek-btn--secondary" type="button">Refresh</button>
+      <button id="refresh" class="search-btn trek-btn--secondary" type="button">Refresh</button>
     </header>
 
     <div class="toolbar">
@@ -58,7 +61,7 @@
       <div class="filter"><label for="start-date">From</label><input id="start-date" type="date"></div>
       <div class="filter"><label for="end-date">To</label><input id="end-date" type="date"></div>
       <div class="filter"><label for="name-search">Activity name</label><input id="name-search" type="search" placeholder="Search activity names"></div>
-      <button id="search" class="trek-btn trek-btn--secondary filter-action" type="button">Search</button>
+      <button id="search" class="search-btn trek-btn--secondary filter-action" type="button" onclick="loadActivities()">Search</button>
     </div>
     <div id="status" class="status" role="status"></div>
     <section id="activities" class="list" aria-live="polite"></section>
