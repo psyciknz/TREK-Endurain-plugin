@@ -61,7 +61,9 @@
       <div class="filter"><label for="start-date">From</label><input id="start-date" type="date"></div>
       <div class="filter"><label for="end-date">To</label><input id="end-date" type="date"></div>
       <div class="filter"><label for="name-search">Activity name</label><input id="name-search" type="search" placeholder="Search activity names"></div>
-      <button id="search" class="search-btn trek-btn--secondary filter-action" type="button" onclick="loadActivities()">Search</button>
+      <button id="search" class="search-btn trek-btn--secondary filter-action" type="button" onclick="loadActivities()">
+        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-2px;margin-right:5px;"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>Search
+      </button>
     </div>
     <div id="status" class="status" role="status"></div>
     <section id="activities" class="list" aria-live="polite"></section>
