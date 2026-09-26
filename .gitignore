@@ -1,2 +1,3 @@
 # Build artifact produced by `trek-plugin-sdk pack`
 plugin.zip
+node_modules/

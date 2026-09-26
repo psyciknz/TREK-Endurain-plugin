@@ -1,9 +1,13 @@
 'use strict';
 
+const crypto = require('crypto');
 const { definePlugin } = require('trek-plugin-sdk');
 
 const API_PREFIX = '/api/v1';
 const MAX_ACTIVITY_LIMIT = 100;
+const ACCESS_TOKEN_REFRESH_BUFFER_SECONDS = 300;
+const authCache = new Map();
+const authRequests = new Map();
 
 function jsonResponse(status, body) {
   return {
@@ -23,16 +27,19 @@ function cleanUrl(value) {
   return url;
 }
 
-function tokenUserId(token) {
+function tokenClaims(token) {
   const parts = String(token || '').split('.');
   if (parts.length !== 3) return null;
   try {
-    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
-    const id = Number(payload.sub || payload.user_id || payload.userId);
-    return Number.isInteger(id) && id > 0 ? id : null;
+    return JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
   } catch (_) {
     return null;
   }
+}
+
+function tokenExpiry(claims, fallbackSeconds) {
+  const expiry = Number(claims && claims.exp);
+  return Number.isFinite(expiry) && expiry > 0 ? expiry : Math.floor(Date.now() / 1000) + fallbackSeconds;
 }
 
 function asArray(data) {
@@ -80,37 +87,198 @@ function normalizeActivity(activity) {
 
 async function setting(ctx, key) {
   const value = await ctx.settings.get(key);
-  if (!value) throw new Error(`Configure the Endurain ${key === 'endurain_url' ? 'URL' : 'access token'} in Settings -> Plugins.`);
-  return value;
+  if (value == null || String(value).trim() === '') {
+    const labels = { endurain_url: 'URL', endurain_username: 'username', endurain_password: 'password' };
+    throw new Error(`Configure the Endurain ${labels[key] || key} in Settings -> Plugins.`);
+  }
+  return String(value);
 }
 
-async function endurainRequest(ctx, path, options) {
+function makeAuthContext(user, base, username, password) {
+  const trekUserId = Number(user && user.id);
+  if (!Number.isInteger(trekUserId) || trekUserId < 1) throw new Error('Open this plugin as a signed-in TREK user.');
+  const accountKey = crypto.createHash('sha256').update(JSON.stringify([trekUserId, base, username])).digest('hex');
+  const passwordFingerprint = crypto.createHash('sha256').update(password).digest('hex');
+  return { trekUserId, accountKey, password, passwordFingerprint, base, username };
+}
+
+async function endurainAuthContext(ctx, user) {
   const base = cleanUrl(await setting(ctx, 'endurain_url'));
-  const token = await setting(ctx, 'access_token');
-  ctx.log.info(`Endurain request: ${(options && options.method) || 'GET'} ${API_PREFIX}${path}`);
+  const username = (await setting(ctx, 'endurain_username')).trim();
+  const password = await setting(ctx, 'endurain_password');
+  return makeAuthContext(user, base, username, password);
+}
+
+class EndurainHttpError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
+}
+
+async function requestEndurain(ctx, base, path, options, bearerToken) {
+  const requestOptions = options || {};
+  const method = requestOptions.method || 'GET';
+  const headers = {
+    Accept: 'application/json',
+    'X-Client-Type': 'mobile',
+    'User-Agent': 'Endurain Import TREK plugin/1.2',
+    ...(bearerToken ? { Authorization: `Bearer ${bearerToken}` } : {}),
+    ...(requestOptions.headers || {}),
+  };
+  ctx.log.info(`Endurain request: ${method} ${API_PREFIX}${path.split('?')[0]}`);
   let response;
   try {
     response = await fetch(`${base}${API_PREFIX}${path}`, {
-      ...(options || {}),
-      headers: {
-        Accept: 'application/json',
-        Authorization: `Bearer ${token}`,
-        'X-Client-Type': 'mobile',
-        'User-Agent': 'Endurain Import TREK plugin/1.1',
-        ...((options && options.headers) || {}),
-      },
+      ...requestOptions,
+      headers,
     });
   } catch (error) {
     throw new Error(`Could not reach Endurain: ${error.message}`);
   }
+  let data;
+  try { data = await response.json(); } catch (_) { data = null; }
   if (!response.ok) {
-    let detail = '';
-    try { detail = (await response.json()).detail || ''; } catch (_) {}
+    const detail = data && data.detail || '';
     ctx.log.warn(`Endurain response: HTTP ${response.status}${detail ? ` (${detail})` : ''}`);
-    throw new Error(`Endurain returned HTTP ${response.status}${detail ? `: ${detail}` : ''}`);
+    throw new EndurainHttpError(response.status, `Endurain returned HTTP ${response.status}${detail ? `: ${detail}` : ''}`);
   }
   ctx.log.info(`Endurain response: HTTP ${response.status}`);
-  return response.json();
+  return data;
+}
+
+function parseTokenResponse(data, previousTokens) {
+  if (data && data.mfa_required) {
+    const error = new Error('This Endurain account requires MFA. MFA sign-in is not supported by this plugin yet.');
+    error.code = 'ENDURAIN_MFA_REQUIRED';
+    throw error;
+  }
+  const accessToken = data && data.access_token;
+  const refreshToken = data && (data.refresh_token || (previousTokens && previousTokens.refreshToken));
+  if (!accessToken || !refreshToken) throw new Error('Endurain login did not return both access and refresh tokens.');
+  const claims = tokenClaims(accessToken);
+  const userId = Number(claims && claims.sub);
+  if (!Number.isInteger(userId) || userId < 1) throw new Error('Endurain did not return an access token with a numeric user id.');
+  const now = Math.floor(Date.now() / 1000);
+  const accessLifetime = Math.max(1, Number(data.expires_in) || 900);
+  const refreshLifetime = Math.max(1, Number(data.refresh_token_expires_in) || 604800);
+  const refreshClaims = tokenClaims(refreshToken);
+  return {
+    userId,
+    accessToken,
+    refreshToken,
+    accessExpiresAt: tokenExpiry(claims, accessLifetime),
+    refreshExpiresAt: tokenExpiry(refreshClaims, refreshLifetime),
+  };
+}
+
+function encryptionKey(password, accountKey) {
+  return crypto.scryptSync(password, Buffer.from(accountKey, 'hex'), 32);
+}
+
+function encryptTokens(tokens, password, accountKey) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', encryptionKey(password, accountKey), iv);
+  const encrypted = Buffer.concat([cipher.update(JSON.stringify(tokens), 'utf8'), cipher.final()]);
+  return [iv.toString('base64url'), cipher.getAuthTag().toString('base64url'), encrypted.toString('base64url')].join('.');
+}
+
+function decryptTokens(value, password, accountKey) {
+  try {
+    const [ivPart, tagPart, encryptedPart] = String(value).split('.');
+    const decipher = crypto.createDecipheriv('aes-256-gcm', encryptionKey(password, accountKey), Buffer.from(ivPart, 'base64url'));
+    decipher.setAuthTag(Buffer.from(tagPart, 'base64url'));
+    const plaintext = Buffer.concat([decipher.update(Buffer.from(encryptedPart, 'base64url')), decipher.final()]);
+    return JSON.parse(plaintext.toString('utf8'));
+  } catch (_) {
+    return null;
+  }
+}
+
+async function loginEndurain(ctx, auth) {
+  const body = new URLSearchParams({ username: auth.username, password: auth.password }).toString();
+  const data = await requestEndurain(ctx, auth.base, '/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body,
+  });
+  return parseTokenResponse(data);
+}
+
+async function refreshEndurain(ctx, auth, tokens) {
+  const data = await requestEndurain(ctx, auth.base, '/auth/refresh', { method: 'POST' }, tokens.refreshToken);
+  return parseTokenResponse(data, tokens);
+}
+
+async function saveTokens(ctx, auth, tokens) {
+  const encrypted = encryptTokens(tokens, auth.password, auth.accountKey);
+  await ctx.db.exec(
+    'INSERT OR REPLACE INTO endurain_auth (user_id, account_key, token_data, updated_at) VALUES (?, ?, ?, ?)',
+    auth.trekUserId, auth.accountKey, encrypted, new Date().toISOString(),
+  );
+}
+
+async function renewOrLogin(ctx, auth, tokens) {
+  const now = Math.floor(Date.now() / 1000);
+  if (tokens && tokens.refreshExpiresAt > now) {
+    try {
+      return await refreshEndurain(ctx, auth, tokens);
+    } catch (error) {
+      if (!(error instanceof EndurainHttpError) || ![401, 403].includes(error.status)) throw error;
+    }
+  }
+  return loginEndurain(ctx, auth);
+}
+
+async function endurainSession(ctx, user, forceRefresh) {
+  const auth = await endurainAuthContext(ctx, user);
+  const cacheKey = `${auth.trekUserId}:${auth.accountKey}`;
+  const inFlight = authRequests.get(cacheKey);
+  if (inFlight) return inFlight;
+
+  const request = (async function () {
+    let tokens = null;
+    let persist = false;
+    const cached = authCache.get(cacheKey);
+    if (cached && cached.passwordFingerprint === auth.passwordFingerprint) {
+      tokens = cached.tokens;
+    } else {
+      const rows = await ctx.db.query(
+        'SELECT token_data FROM endurain_auth WHERE user_id = ? AND account_key = ?',
+        auth.trekUserId, auth.accountKey,
+      );
+      if (rows.length) tokens = decryptTokens(rows[0].token_data, auth.password, auth.accountKey);
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+    if (forceRefresh || !tokens || tokens.accessExpiresAt - now <= ACCESS_TOKEN_REFRESH_BUFFER_SECONDS) {
+      tokens = await renewOrLogin(ctx, auth, tokens);
+      persist = true;
+    }
+    if (persist) await saveTokens(ctx, auth, tokens);
+    authCache.set(cacheKey, { passwordFingerprint: auth.passwordFingerprint, tokens });
+    return { base: auth.base, accessToken: tokens.accessToken, userId: tokens.userId };
+  }());
+
+  authRequests.set(cacheKey, request);
+  try {
+    return await request;
+  } finally {
+    if (authRequests.get(cacheKey) === request) authRequests.delete(cacheKey);
+  }
+}
+
+async function endurainRequest(ctx, user, path, options) {
+  let session = await endurainSession(ctx, user, false);
+  let response;
+  try {
+    response = await requestEndurain(ctx, session.base, path, options, session.accessToken);
+  } catch (error) {
+    if (!(error instanceof EndurainHttpError) || error.status !== 401) throw error;
+    session = await endurainSession(ctx, user, true);
+    response = await requestEndurain(ctx, session.base, path, options, session.accessToken);
+  }
+  return response;
 }
 
 async function tripRange(ctx, tripId) {
@@ -178,6 +346,16 @@ module.exports = definePlugin({
         PRIMARY KEY (trip_id, activity_id)
       )`,
     );
+    await ctx.db.migrate(
+      '002_endurain_auth',
+      `CREATE TABLE IF NOT EXISTS endurain_auth (
+        user_id INTEGER NOT NULL,
+        account_key TEXT NOT NULL,
+        token_data TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (user_id, account_key)
+      )`,
+    );
   },
 
   routes: [
@@ -192,16 +370,16 @@ module.exports = definePlugin({
           const startDate = String(req.query.startDate || '').trim();
           const endDate = String(req.query.endDate || '').trim();
           const nameSearch = String(req.query.nameSearch || '').trim();
-          const token = await setting(ctx, 'access_token');
-          const userId = tokenUserId(token);
-          if (!userId) throw new Error('The Endurain access token does not contain a usable user id (JWT sub claim).');
+          const session = await endurainSession(ctx, req.user, false);
+          const userId = session.userId;
+          if (!Number.isInteger(userId) || userId < 1) throw new Error('Endurain did not return an access token with a numeric user id.');
           const params = new URLSearchParams({ sort_by: 'start_time', sort_order: 'desc' });
           if (startDate) params.set('start_date', startDate);
           if (endDate) params.set('end_date', endDate);
           if (nameSearch) params.set('name_search', nameSearch);
           const path = `/activities/user/${userId}/page_number/${page}/num_records/${limit}?${params}`;
           ctx.log.info(`Loading Endurain activities: user=${userId}, page=${page}, limit=${limit}, start=${startDate || '-'}, end=${endDate || '-'}, name=${nameSearch || '-'}`);
-          const data = await endurainRequest(ctx, path);
+          const data = await endurainRequest(ctx, req.user, path);
           return jsonResponse(200, { ok: true, activities: asArray(data).map(normalizeActivity), page, limit });
         } catch (error) {
           ctx.log.warn(`Endurain activity list failed: ${error.message}`);
@@ -241,7 +419,7 @@ module.exports = definePlugin({
         try {
           const results = [];
           for (const id of ids) {
-            const data = await endurainRequest(ctx, `/activities/${encodeURIComponent(id)}`);
+            const data = await endurainRequest(ctx, req.user, `/activities/${encodeURIComponent(id)}`);
             const activity = data && (data.activity || data);
             results.push(await importActivity(ctx, tripId, activity));
           }

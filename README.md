@@ -6,25 +6,28 @@ A TREK trip-page plugin that lists activities from a user's self-hosted Endurain
 
 Each imported activity becomes a TREK place at the activity's starting coordinate, assigned to a TREK day matching the Endurain activity date. The place notes retain the Endurain activity id, sport, and description. Re-importing the same activity into the same trip is de-duplicated.
 
-This plugin intentionally uses its own activity picker. TREK plugins cannot invoke or replace the native GPX/KML/KMZ file picker, and Endurain's current API-key scope only supports uploads. The importer therefore uses an Endurain bearer access token to read activity metadata and creates native TREK places through the plugin SDK.
+This plugin intentionally uses its own activity picker. TREK plugins cannot invoke or replace the native GPX/KML/KMZ file picker, and Endurain API keys currently only support uploads. The importer signs in with the configured Endurain username and password, then uses short-lived JWT access tokens to read activity metadata and creates native TREK places through the plugin SDK.
 
 ## Endurain setup
 
 1. Open TREK Settings -> Plugins -> Endurain Import.
 2. Enter the HTTPS URL of the Endurain instance, without `/api/v1`.
-3. Enter an Endurain bearer access token with access to activities.
+3. Enter your Endurain username and password.
 4. Open a TREK trip and select the Endurain Import tab.
 5. Select activities and click Import selected.
 
-The access token is a user-scoped secret setting. It is read only by the server route and is never sent to the browser frame.
+The username and password are user-scoped settings. TREK encrypts the password, and the plugin reads both only on the server. The plugin signs in using Endurain's mobile API, stores the access and rotating refresh tokens encrypted in its private database, and refreshes access tokens automatically. Credentials and tokens are never sent to the browser frame. Password-based MFA challenges and SSO-only accounts are not currently supported.
 
 The Endurain API is expected at:
 
 ```text
 GET  {endurainUrl}/api/v1/activities/user/{userId}/page_number/1/num_records/100?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD&name_search=ride
 GET  {endurainUrl}/api/v1/activities/{activityId}
+POST {endurainUrl}/api/v1/auth/login
+POST {endurainUrl}/api/v1/auth/refresh
+```
 
-The list route and filters match Endurain's authenticated activity API. The user id is read from the access token's JWT `sub` claim; the token is never logged or sent to the browser.
+The list route and filters match Endurain's authenticated activity API. The user id comes from the access token's JWT `sub` claim. Endurain API keys cannot read activities and are not used by this plugin.
 ```
 
 Endurain documents bearer authentication with `Authorization: Bearer <token>` and `X-Client-Type`. The plugin sends `X-Client-Type: mobile` for read requests.
@@ -53,7 +56,7 @@ The plugin declares `operatorEgress: true` because Endurain is self-hosted. Afte
 
 ## Setup
 
-Install or sideload the packed plugin, activate it in Admin -> Plugins, add the Endurain hostname to Allowed hosts, and configure the two user settings before opening the plugin page.
+Install or sideload the packed plugin, activate it in Admin -> Plugins, add the Endurain hostname to Allowed hosts, and configure the three user settings before opening the plugin page.
 
 ## Development
 

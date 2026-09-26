@@ -212,7 +212,7 @@
         }).catch(function (error) {
           activities = [];
           list.innerHTML = '<div class="error">' + escapeHtml(error.message || 'Could not load activities.') + '</div>';
-          setStatus('Check the Endurain URL and access token in Settings -> Plugins.', 'error');
+          setStatus('Check the Endurain URL, username, and password in Settings -> Plugins.', 'error');
           updateControls();
         });
       }

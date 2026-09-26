@@ -14,13 +14,18 @@ function response(body, status) {
   };
 }
 
+function jwt(claims) {
+  return `header.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.signature`;
+}
+
 (async () => {
   const mock = createMockHost({
     grants: ['db:own', 'db:read:trips', 'db:write:places', 'db:write:days', 'db:write:itinerary', 'db:meta', 'http:outbound'],
     actingUserId: 1,
     userSettings: {
       endurain_url: 'https://endurain.example.test',
-      access_token: 'header.eyJzdWIiOiIxIn0.signature',
+      endurain_username: 'rider@example.test',
+      endurain_password: 'test-password',
     },
     trips: {
       7: { members: [1], data: { id: 7, title: 'Ride weekend', start_date: '2026-09-20', end_date: '2026-09-25' }, days: [] },
@@ -28,9 +33,41 @@ function response(body, status) {
   });
   const route = (path) => plugin.routes.find((entry) => entry.path === path);
   const requests = [];
+  const authRows = new Map();
+  const originalQuery = mock.ctx.db.query.bind(mock.ctx.db);
+  const originalExec = mock.ctx.db.exec.bind(mock.ctx.db);
+  mock.ctx.db.query = async (sql, ...args) => {
+    if (sql.includes('FROM endurain_auth')) return authRows.has(`${args[0]}:${args[1]}`) ? [authRows.get(`${args[0]}:${args[1]}`)] : [];
+    return originalQuery(sql, ...args);
+  };
+  mock.ctx.db.exec = async (sql, ...args) => {
+    if (sql.startsWith('INSERT OR REPLACE INTO endurain_auth')) {
+      authRows.set(`${args[0]}:${args[1]}`, { token_data: args[2] });
+      return { changes: 1 };
+    }
+    return originalExec(sql, ...args);
+  };
+  const initialAccessToken = jwt({ sub: '1', exp: Math.floor(Date.now() / 1000) + 120 });
+  const initialRefreshToken = jwt({ sub: '1', exp: Math.floor(Date.now() / 1000) + 604800 });
+  const refreshedAccessToken = jwt({ sub: '1', exp: Math.floor(Date.now() / 1000) + 900 });
+  const refreshedRefreshToken = jwt({ sub: '1', exp: Math.floor(Date.now() / 1000) + 604800 });
 
   global.fetch = async (url, options) => {
     requests.push({ url, options });
+    if (url.endsWith('/auth/login')) {
+      assert.strictEqual(options.method, 'POST');
+      assert.strictEqual(options.headers['X-Client-Type'], 'mobile');
+      assert.strictEqual(options.headers['Content-Type'], 'application/x-www-form-urlencoded');
+      assert.strictEqual(new URLSearchParams(options.body).get('username'), 'rider@example.test');
+      assert.strictEqual(new URLSearchParams(options.body).get('password'), 'test-password');
+      return response({ access_token: initialAccessToken, refresh_token: initialRefreshToken, expires_in: 120, refresh_token_expires_in: 604800 }, 200);
+    }
+    if (url.endsWith('/auth/refresh')) {
+      assert.strictEqual(options.method, 'POST');
+      assert.strictEqual(options.headers.Authorization, `Bearer ${initialRefreshToken}`);
+      assert.strictEqual(options.headers['X-Client-Type'], 'mobile');
+      return response({ access_token: refreshedAccessToken, refresh_token: refreshedRefreshToken, expires_in: 900, refresh_token_expires_in: 604800 }, 200);
+    }
     if (url.includes('/activities/user/1/page_number/1/num_records/100?')) {
       assert.strictEqual(new URL(url).searchParams.get('start_date'), '2026-09-20');
       assert.strictEqual(new URL(url).searchParams.get('end_date'), '2026-09-25');
@@ -49,15 +86,21 @@ function response(body, status) {
     const rangeBody = JSON.parse(range.body);
     assert.deepStrictEqual(rangeBody, { startDate: '2026-09-20', endDate: '2026-09-25' });
 
-    const list = await route('/activities').handler({ query: { page: '1', limit: '100', startDate: '2026-09-20', endDate: '2026-09-25', nameSearch: 'Morning' }, body: null }, mock.ctx);
+    const list = await route('/activities').handler({ user: { id: 1 }, query: { page: '1', limit: '100', startDate: '2026-09-20', endDate: '2026-09-25', nameSearch: 'Morning' }, body: null }, mock.ctx);
     const listBody = JSON.parse(list.body);
-    assert.strictEqual(list.status, 200);
+    assert.strictEqual(list.status, 200, list.body);
     assert.strictEqual(listBody.activities[0].id, '42');
-    assert.strictEqual(requests[0].options.headers.Authorization, 'Bearer header.eyJzdWIiOiIxIn0.signature');
-    assert.strictEqual(requests[0].options.headers['X-Client-Type'], 'mobile');
-    assert.strictEqual(requests[0].options.headers['User-Agent'], 'Endurain Import TREK plugin/1.1');
+    const listRequest = requests.find((request) => request.url.includes('/activities/user/'));
+    assert.strictEqual(listRequest.options.headers.Authorization, `Bearer ${refreshedAccessToken}`);
+    assert.strictEqual(listRequest.options.headers['X-Client-Type'], 'mobile');
+    assert.strictEqual(listRequest.options.headers['User-Agent'], 'Endurain Import TREK plugin/1.2');
+    assert.strictEqual(requests.filter((request) => request.url.endsWith('/auth/login')).length, 1);
+    assert.strictEqual(requests.filter((request) => request.url.endsWith('/auth/refresh')).length, 1);
+    const storedTokens = Array.from(authRows.values())[0].token_data;
+    assert.strictEqual(storedTokens.includes(refreshedAccessToken), false);
+    assert.strictEqual(storedTokens.includes(refreshedRefreshToken), false);
 
-    const imported = await route('/import').handler({ body: { tripId: 7, activityIds: ['42'] } }, mock.ctx);
+    const imported = await route('/import').handler({ user: { id: 1 }, body: { tripId: 7, activityIds: ['42'] } }, mock.ctx);
     const importedBody = JSON.parse(imported.body);
     assert.strictEqual(imported.status, 200);
     assert.strictEqual(importedBody.imported[0].duplicate, false);

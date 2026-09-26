@@ -1,7 +1,7 @@
 {
   "id": "endurain-import",
   "name": "Endurain Import",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "apiVersion": 1,
   "author": "psyciknz",
   "description": "Browse Endurain activities and import selected activities into a TREK trip.",
@@ -30,13 +30,20 @@
       "placeholder": "https://endurain.example.com"
     },
     {
-      "key": "access_token",
-      "label": "Endurain access token",
+      "key": "endurain_username",
+      "label": "Endurain username",
+      "scope": "user",
+      "required": true,
+      "placeholder": "Your Endurain username or email"
+    },
+    {
+      "key": "endurain_password",
+      "label": "Endurain password",
       "scope": "user",
       "required": true,
       "secret": true,
       "input_type": "password",
-      "hint": "Use an Endurain bearer access token. It is stored encrypted and never sent to the browser."
+      "hint": "Stored encrypted by TREK and used only by the plugin server to sign in to Endurain."
     }
   ]
 }
