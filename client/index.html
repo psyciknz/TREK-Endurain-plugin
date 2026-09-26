@@ -61,7 +61,7 @@
       <div class="filter"><label for="start-date">From</label><input id="start-date" type="date"></div>
       <div class="filter"><label for="end-date">To</label><input id="end-date" type="date"></div>
       <div class="filter"><label for="name-search">Activity name</label><input id="name-search" type="search" placeholder="Search activity names"></div>
-      <button id="search" class="search-btn trek-btn--secondary filter-action" type="button" onclick="loadActivities()">
+      <button id="search" class="search-btn trek-btn--secondary filter-action" type="button">
         <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-2px;margin-right:5px;"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>Search
       </button>
     </div>
@@ -69,6 +69,65 @@
     <section id="activities" class="list" aria-live="polite"></section>
   </main>
 
+  <script>
+    (function () {
+      if (window.trek && typeof window.trek.onContext === 'function' && typeof window.trek.invoke === 'function') return;
+      var callbacks = [];
+      var pending = Object.create(null);
+      var lastContext = null;
+      var sequence = 0;
+
+      function send(message) {
+        window.parent.postMessage(message, '*');
+      }
+
+      window.addEventListener('message', function (event) {
+        if (event.source !== window.parent) return;
+        var message = event.data;
+        if (!message || typeof message !== 'object') return;
+        if (message.type === 'trek:context') {
+          lastContext = message;
+          api.context = message;
+          callbacks.slice().forEach(function (callback) { callback(message); });
+        } else if (message.type === 'trek:response' || message.type === 'trek:error') {
+          var request = pending[message.requestId];
+          if (!request) return;
+          delete pending[message.requestId];
+          if (message.type === 'trek:error') {
+            var error = new Error(message.message || 'Plugin request failed.');
+            error.code = message.code;
+            request.reject(error);
+          } else {
+            request.resolve(message.data);
+          }
+        }
+      });
+
+      var api = window.trek = {
+        context: null,
+        onContext: function (callback) {
+          callbacks.push(callback);
+          if (lastContext) callback(lastContext);
+          return function () {
+            var index = callbacks.indexOf(callback);
+            if (index !== -1) callbacks.splice(index, 1);
+          };
+        },
+        invoke: function (sub, options) {
+          options = options || {};
+          var requestId = 'r' + (++sequence);
+          return new Promise(function (resolve, reject) {
+            pending[requestId] = { resolve: resolve, reject: reject };
+            send({ type: 'trek:invoke', requestId: requestId, sub: sub, method: options.method, body: options.body });
+          });
+        },
+        ready: function () { send({ type: 'trek:ready' }); },
+        requestContext: function () { send({ type: 'trek:context:request' }); }
+      };
+      api.ready();
+      api.requestContext();
+    }());
+  </script>
   <script>
     (function () {
       'use strict';
