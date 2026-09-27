@@ -26,8 +26,8 @@ Use tokens rather than hard-coded colors in components. The host may override to
 
 ## Controls
 
-- Primary actions such as Search and Import use the accent fill and accent text.
-- Secondary actions such as Refresh use a card surface, primary text, and a primary-border outline.
+- Primary actions such as Search and Import use primary text as the fill and the main surface as text (near-black in light mode, contrast-safe in dark mode).
+- Secondary actions such as Refresh use the secondary surface, primary text, and a primary-border outline.
 - Select all uses the transparent ghost treatment.
 - Inputs use the input surface, primary border, 10px corners, and an accent focus ring.
 - Repeated activity rows use the card surface, a subtle border, 16px corners, and a restrained hover border/shadow.

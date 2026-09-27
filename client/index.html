@@ -32,9 +32,9 @@
     .status.success { color: var(--success); }
     .status.error { color: var(--danger); }
     .search-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 38px; padding: 0 16px; border: 1px solid transparent; border-radius: 10px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: background .15s, box-shadow .15s, border-color .15s; }
-    .search-btn.trek-btn--primary { background: var(--accent); color: var(--accent-text); box-shadow: var(--shadow-sm); }
-    .search-btn.trek-btn--primary:hover:not(:disabled) { background: var(--accent-hover); }
-    .search-btn.trek-btn--secondary { background: var(--bg-card); color: var(--text-primary); border-color: var(--border-primary); box-shadow: var(--shadow-sm); }
+    .trek-btn--primary { background: var(--text-primary); color: var(--bg-primary); box-shadow: var(--shadow-sm); }
+    .trek-btn--primary:hover:not(:disabled) { background: var(--text-secondary); }
+    .search-btn.trek-btn--secondary { background: var(--bg-secondary); color: var(--text-primary); border-color: var(--border-primary); box-shadow: var(--shadow-sm); }
     .search-btn.trek-btn--secondary:hover:not(:disabled) { background: var(--bg-hover); }
     .search-btn:disabled { opacity: .5; cursor: not-allowed; }
     @media (max-width: 560px) {
