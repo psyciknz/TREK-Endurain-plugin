@@ -51,6 +51,7 @@ function jwt(claims) {
   const initialRefreshToken = jwt({ sub: '1', exp: Math.floor(Date.now() / 1000) + 604800 });
   const refreshedAccessToken = jwt({ sub: '1', exp: Math.floor(Date.now() / 1000) + 900 });
   const refreshedRefreshToken = jwt({ sub: '1', exp: Math.floor(Date.now() / 1000) + 604800 });
+  const activityQueries = [];
 
   global.fetch = async (url, options) => {
     requests.push({ url, options });
@@ -69,10 +70,8 @@ function jwt(claims) {
       return response({ access_token: refreshedAccessToken, refresh_token: refreshedRefreshToken, expires_in: 900, refresh_token_expires_in: 604800 }, 200);
     }
     if (url.includes('/activities/user/1/page_number/1/num_records/100?')) {
-      assert.strictEqual(new URL(url).searchParams.get('start_date'), '2026-09-20');
-      assert.strictEqual(new URL(url).searchParams.get('end_date'), '2026-09-25');
-      assert.strictEqual(new URL(url).searchParams.get('name_search'), 'Morning');
-      return response({ records: [{ id: 42, name: 'Morning ride', sport_type: 'cycling', start_date_local: '2026-09-22T08:00:00Z', start_latitude: 51.5, start_longitude: -0.1, distance: 12345 }] }, 200);
+      activityQueries.push(new URL(url).searchParams);
+      return response({ records: [{ id: 42, name: 'Morning ride', sport_type: 'cycling', start_time: '2026-09-21T20:00:00Z', start_time_tz_applied: '2026-09-22T08:00:00', start_latitude: 51.5, start_longitude: -0.1, distance: 12345 }] }, 200);
     }
     if (url.endsWith('/activities/42')) {
       return response({ id: 42, name: 'Morning ride', sport_type: 'cycling', start_date_local: '2026-09-22T08:00:00Z', description: 'Test activity' }, 200);
@@ -93,6 +92,9 @@ function jwt(claims) {
     const listBody = JSON.parse(list.body);
     assert.strictEqual(list.status, 200, list.body);
     assert.strictEqual(listBody.activities[0].id, '42');
+    assert.strictEqual(activityQueries[0].get('start_date'), '2026-09-20');
+    assert.strictEqual(activityQueries[0].get('end_date'), '2026-09-25');
+    assert.strictEqual(activityQueries[0].get('name_search'), 'Morning');
     const listRequest = requests.find((request) => request.url.includes('/activities/user/'));
     assert.strictEqual(listRequest.options.headers.Authorization, `Bearer ${refreshedAccessToken}`);
     assert.strictEqual(listRequest.options.headers['X-Client-Type'], 'mobile');
@@ -102,6 +104,16 @@ function jwt(claims) {
     const storedTokens = Array.from(authRows.values())[0].token_data;
     assert.strictEqual(storedTokens.includes(refreshedAccessToken), false);
     assert.strictEqual(storedTokens.includes(refreshedRefreshToken), false);
+
+    const outsideRange = await route('/activities').handler({
+      user: { id: 1 },
+      query: { page: '1', limit: '100', startDate: '2026-09-01', endDate: '2026-09-10', nameSearch: 'Morning' },
+      body: null,
+    }, mock.ctx);
+    assert.strictEqual(outsideRange.status, 200, outsideRange.body);
+    assert.deepStrictEqual(JSON.parse(outsideRange.body).activities, []);
+    assert.strictEqual(activityQueries[1].get('start_date'), '2026-09-01');
+    assert.strictEqual(activityQueries[1].get('end_date'), '2026-09-10');
 
     const imported = await route('/import').handler({ user: { id: 1 }, body: { tripId: 7, activityIds: ['42'] } }, mock.ctx);
     const importedBody = JSON.parse(imported.body);

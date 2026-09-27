@@ -56,10 +56,16 @@ function activityId(activity) {
 }
 
 function activityDate(activity) {
-  const value = activity && (activity.start_date_local || activity.start_time || activity.created_at);
+  const value = activity && (activity.start_time_tz_applied || activity.start_date_local || activity.start_time || activity.created_at);
   if (!value) return null;
   const date = String(value).slice(0, 10);
   return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null;
+}
+
+function matchesDateRange(activity, startDate, endDate) {
+  if (!startDate && !endDate) return true;
+  const date = activityDate(activity);
+  return !!date && (!startDate || date >= startDate) && (!endDate || date <= endDate);
 }
 
 function coordinate(activity, names) {
@@ -397,7 +403,10 @@ module.exports = definePlugin({
           const path = `/activities/user/${userId}/page_number/${page}/num_records/${limit}?${params}`;
           ctx.log.info(`Loading Endurain activities: user=${userId}, page=${page}, limit=${limit}, start=${startDate || '-'}, end=${endDate || '-'}, name=${nameSearch || '-'}`);
           const data = await endurainRequest(ctx, req.user, path);
-          return jsonResponse(200, { ok: true, activities: asArray(data).map(normalizeActivity), page, limit });
+          const activities = asArray(data)
+            .filter((activity) => matchesDateRange(activity, startDate, endDate))
+            .map(normalizeActivity);
+          return jsonResponse(200, { ok: true, activities, page, limit });
         } catch (error) {
           ctx.log.warn(`Endurain activity list failed: ${error.message}`);
           return fail(422, error.message);

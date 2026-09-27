@@ -35,6 +35,7 @@ Endurain documents bearer authentication with `Authorization: Bearer <token>` an
 ## Screenshots
 
 The activity picker screenshot is stored in `docs/screenshot.png`.
+The page styling follows the transport plugin reference in [style-guide.md](docs/style-guide.md).
 
 ## Compatibility
 
