@@ -1,7 +1,7 @@
 {
   "id": "endurain-import",
   "name": "Endurain Import",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "apiVersion": 1,
   "author": "psyciknz",
   "description": "Browse Endurain activities and import selected activities into a TREK trip.",

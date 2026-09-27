@@ -111,6 +111,9 @@ function jwt(claims) {
     assert.strictEqual(importedBody.imported[0].activity.startLat, 51.5);
     assert.strictEqual(importedBody.imported[0].activity.startLng, -0.1);
     assert.strictEqual(requests.some((request) => request.url.endsWith('/activities_streams/activity_id/42/stream_type/7')), true);
+    const createdPlaces = await mock.ctx.trips.getPlaces(7);
+    assert.strictEqual(createdPlaces[0].website, 'https://endurain.example.test/activity/42');
+    assert.ok(createdPlaces[0].notes.includes('https://endurain.example.test/activity/42'));
     assert.strictEqual(mock.calls.some((call) => call.method === 'places.create'), true);
     assert.strictEqual(mock.calls.some((call) => call.method === 'itinerary.assign'), true);
   } finally {

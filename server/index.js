@@ -326,10 +326,12 @@ async function importActivity(ctx, tripId, activity) {
     throw new Error(`Activity "${normalized.name}" has no starting coordinates.`);
   }
 
+  const activityUrl = `${cleanUrl(await setting(ctx, 'endurain_url'))}/activity/${encodeURIComponent(id)}`;
   const day = await findOrCreateDay(ctx, tripId, normalized.date);
   const notes = [
     'Imported from Endurain.',
     `Endurain activity: ${id}.`,
+    activityUrl,
     normalized.sport ? `Sport: ${normalized.sport}.` : '',
     normalized.description,
   ].filter(Boolean).join(' ');
@@ -337,6 +339,7 @@ async function importActivity(ctx, tripId, activity) {
     name: normalized.name,
     lat: normalized.startLat,
     lng: normalized.startLng,
+    website: activityUrl,
     notes,
   });
   await ctx.itinerary.assign(tripId, day.id, place.id, notes);
