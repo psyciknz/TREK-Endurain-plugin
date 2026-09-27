@@ -85,6 +85,20 @@ function normalizeActivity(activity) {
   };
 }
 
+function firstGpsPoint(stream) {
+  const waypoints = Array.isArray(stream) ? stream : stream && (stream.stream_waypoints || stream.data);
+  if (!Array.isArray(waypoints)) return null;
+  for (const waypoint of waypoints) {
+    if (!waypoint || typeof waypoint !== 'object') continue;
+    const latitude = Number(waypoint.lat ?? waypoint.latitude);
+    const longitude = Number(waypoint.lon ?? waypoint.lng ?? waypoint.longitude);
+    if (Number.isFinite(latitude) && latitude >= -90 && latitude <= 90 && Number.isFinite(longitude) && longitude >= -180 && longitude <= 180) {
+      return { latitude, longitude };
+    }
+  }
+  return null;
+}
+
 async function setting(ctx, key) {
   const value = await ctx.settings.get(key);
   if (value == null || String(value).trim() === '') {
@@ -420,7 +434,24 @@ module.exports = definePlugin({
           const results = [];
           for (const id of ids) {
             const data = await endurainRequest(ctx, req.user, `/activities/${encodeURIComponent(id)}`);
-            const activity = data && (data.activity || data);
+            let activity = data && (data.activity || data);
+            const normalized = normalizeActivity(activity);
+            if (normalized.startLat == null || normalized.startLng == null) {
+              let stream = null;
+              try {
+                stream = await endurainRequest(ctx, req.user, `/activities_streams/activity_id/${encodeURIComponent(id)}/stream_type/7`);
+              } catch (error) {
+                if (!(error instanceof EndurainHttpError) || ![404, 422].includes(error.status)) throw error;
+              }
+              const point = firstGpsPoint(stream);
+              if (point) {
+                activity = {
+                  ...activity,
+                  start_latitude: normalized.startLat == null ? point.latitude : normalized.startLat,
+                  start_longitude: normalized.startLng == null ? point.longitude : normalized.startLng,
+                };
+              }
+            }
             results.push(await importActivity(ctx, tripId, activity));
           }
           return jsonResponse(200, { ok: true, tripId, imported: results });

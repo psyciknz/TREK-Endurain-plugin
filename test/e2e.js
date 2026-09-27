@@ -75,7 +75,10 @@ function jwt(claims) {
       return response({ records: [{ id: 42, name: 'Morning ride', sport_type: 'cycling', start_date_local: '2026-09-22T08:00:00Z', start_latitude: 51.5, start_longitude: -0.1, distance: 12345 }] }, 200);
     }
     if (url.endsWith('/activities/42')) {
-      return response({ id: 42, name: 'Morning ride', sport_type: 'cycling', start_date_local: '2026-09-22T08:00:00Z', start_latitude: 51.5, start_longitude: -0.1, description: 'Test activity' }, 200);
+      return response({ id: 42, name: 'Morning ride', sport_type: 'cycling', start_date_local: '2026-09-22T08:00:00Z', description: 'Test activity' }, 200);
+    }
+    if (url.endsWith('/activities_streams/activity_id/42/stream_type/7')) {
+      return response({ stream_waypoints: [{ lat: null, lon: null }, { latitude: 51.5, longitude: -0.1 }] }, 200);
     }
     throw new Error(`Unexpected URL: ${url}`);
   };
@@ -105,6 +108,9 @@ function jwt(claims) {
     assert.strictEqual(imported.status, 200);
     assert.strictEqual(importedBody.imported[0].duplicate, false);
     assert.strictEqual(importedBody.imported[0].activity.name, 'Morning ride');
+    assert.strictEqual(importedBody.imported[0].activity.startLat, 51.5);
+    assert.strictEqual(importedBody.imported[0].activity.startLng, -0.1);
+    assert.strictEqual(requests.some((request) => request.url.endsWith('/activities_streams/activity_id/42/stream_type/7')), true);
     assert.strictEqual(mock.calls.some((call) => call.method === 'places.create'), true);
     assert.strictEqual(mock.calls.some((call) => call.method === 'itinerary.assign'), true);
   } finally {

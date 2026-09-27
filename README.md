@@ -4,7 +4,7 @@
 
 A TREK trip-page plugin that lists activities from a user's self-hosted Endurain instance and imports selected activities into the currently open TREK trip.
 
-Each imported activity becomes a TREK place at the activity's starting coordinate, assigned to a TREK day matching the Endurain activity date. The place notes retain the Endurain activity id, sport, and description. Re-importing the same activity into the same trip is de-duplicated.
+Each imported activity becomes a TREK place at its starting coordinate, assigned to a TREK day matching the Endurain activity date. When Endurain does not include coordinates in activity details, the plugin uses the first valid point from the activity's GPS stream. The place notes retain the Endurain activity id, sport, and description. Re-importing the same activity into the same trip is de-duplicated.
 
 This plugin intentionally uses its own activity picker. TREK plugins cannot invoke or replace the native GPX/KML/KMZ file picker, and Endurain API keys currently only support uploads. The importer signs in with the configured Endurain username and password, then uses short-lived JWT access tokens to read activity metadata and creates native TREK places through the plugin SDK.
 
